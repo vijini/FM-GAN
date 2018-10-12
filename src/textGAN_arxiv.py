@@ -1,11 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-Yizhe Zhang
-
-TextCNN
-"""
-## 152.3.214.203/6006
-
 import os
 GPUID = 1
 os.environ['CUDA_VISIBLE_DEVICES'] = str(GPUID)

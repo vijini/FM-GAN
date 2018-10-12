@@ -1,6 +1,4 @@
 """
-Yizhe Zhang
-
 Main model file
 """
 import tensorflow as tf
@@ -682,7 +680,7 @@ def cost_matrix(x, y):
     return cos_dis
 
 
-def IPOT(x, y, n, beta=10):
+def IPOT(x, y, n, beta=1):
     # pdb.set_trace()
     sigma = tf.scalar_mul(1. / n, tf.ones([n, 1]))
     T = tf.ones([n, n])

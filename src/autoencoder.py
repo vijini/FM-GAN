@@ -1,9 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-based on TextGAN
-"""
-## 152.3.214.203/6006
-
 import os
 GPUID = 1
 os.environ['CUDA_VISIBLE_DEVICES'] = str(GPUID)
@@ -64,15 +59,15 @@ class Options(object):
         self.W_emb = None
         self.cnn_W = None
         self.cnn_b = None
-        
-            
+
+
         self.filter_shape = 5
         self.filter_size = 300
         self.multiplier = 2
         self.embed_size = 300
         self.latent_size = 128
         self.lr = 1e-4
-        
+
         self.rnn_share_emb = True
         self.additive_noise_lambda = 0.0
         self.bp_truncation = None
@@ -91,7 +86,7 @@ class Options(object):
         self.decay_rate = 0.99
         self.relu_w = False
 
-        
+
         self.print_freq = 1000
         self.valid_freq = 1000
 
@@ -103,16 +98,16 @@ class Options(object):
         self.discrimination = False
         self.H_dis = 300
         self.ef_dim = 128
-        
-        
-        # bird 
+
+
+        # bird
         if choose_data == 'cub':
             self.maxlen = 41
             self.n_words = 4391
             self.save_path = "./save/" + "bird_" + str(self.n_gan) + "_dim_" + self.model + "_" + self.substitution + str(self.permutation)
             self.log_path = "./log"
             self.save_txt = './text'
-            
+
         # SNLI
         elif choose_data == 'SNLI':
             self.maxlen = 31
@@ -120,23 +115,22 @@ class Options(object):
             self.save_path = "./save_SNLI/" + "SNLI_" + str(self.n_gan) + "_dim_" + self.model + "_" + self.substitution + str(self.permutation)
             self.log_path = "./log_SNLI"
             self.save_txt = './text_SNLI'
-            
-            
+
         # MSCOCO
         elif choose_data == 'coco':
             self.maxlen = 51
             self.n_words = 27842
             self.save_path = "./save_coco/" + "coco_" + str(self.n_gan) + "_dim_" + self.model + "_" + self.substitution + str(self.permutation)
-            self.save_txt = './text_coco'            
+            self.save_txt = './text_coco'
             self.log_path = "./log_coco"
-        
+
         elif choose_data == 'news':
             self.maxlen = 51
             self.n_words = 5728
             self.save_path = "./save_news/" + "news_" + str(self.n_gan) + "_dim_" + self.model + "_" + self.substitution + str(self.permutation)
-            self.save_txt = './text_news'            
+            self.save_txt = './text_news'
             self.log_path = "./log_news"
-            
+
         self.sent_len = self.maxlen + 2*(self.filter_shape-1)
         self.sent_len2 = np.int32(floor((self.sent_len - self.filter_shape)/self.stride[0]) + 1)
         self.sent_len3 = np.int32(floor((self.sent_len2 - self.filter_shape)/self.stride[1]) + 1)
@@ -151,23 +145,23 @@ class Options(object):
 
 def auto_encoder(x, x_org, is_train, opt, opt_t=None):
     # print x.get_shape()  # batch L
-    with tf.variable_scope("pretrain"):    
-    
+    with tf.variable_scope("pretrain"):
+
         if not opt_t: opt_t = opt
         x_emb, W_norm = embedding(x, opt)  # batch L emb
-	
+
         x_emb = tf.expand_dims(x_emb, 3)  # batch L emb 1
-        
+
         res = {}
-        
+
         H, res = conv_encoder(x_emb, is_train, opt, res)
-        
+
         H_mean, H_log_sigma_sq = vae_classifier_2layer(H, opt)
         eps = tf.random_normal([opt.batch_size, opt.ef_dim], 0, 1, dtype=tf.float32)
         H_dec = tf.add(H_mean, tf.multiply(tf.sqrt(tf.exp(H_log_sigma_sq)), eps))
-        
+
         H_dec2 = tf.identity(H_dec)
-         
+
         # print x_rec.get_shape()
         if opt.model == 'rnn_rnn':
             loss, rec_sent_1, _ = seq2seq(x, x_org, opt)
@@ -175,38 +169,38 @@ def auto_encoder(x, x_org, is_train, opt, opt_t=None):
             #res['logits'] = logits
             res['rec_sents_feed_y'] = rec_sent_1
             res['rec_sents'] = rec_sent_2
-            
-            
+
+
         elif opt.model == 'cnn_rnn':
             # lstm decoder
             if opt.rnn_share_emb:
                 loss, rec_sent_1, _ = lstm_decoder_embedding(H_dec2, x_org, W_norm, opt_t)
-                # random_z = tf.random_normal([opt.batch_size, opt.ef_dim])  
+                # random_z = tf.random_normal([opt.batch_size, opt.ef_dim])
                 _, rec_sent_2, _ = lstm_decoder_embedding(H_dec2, x_org, W_norm, opt_t, feed_previous=True, is_reuse=True)
-                
+
             else:
                 loss, rec_sent_1, _ = lstm_decoder(H_dec2, x_org, opt_t)  #
                 _, rec_sent_2, _ = lstm_decoder(H_dec2, x_org, opt_t, feed_previous=True, is_reuse=True)
-                
-            
-            kl_loss= tf.reduce_mean(-0.5 * tf.reduce_mean(1 + H_log_sigma_sq 
-                                                          - tf.square(H_mean) 
+
+
+            kl_loss= tf.reduce_mean(-0.5 * tf.reduce_mean(1 + H_log_sigma_sq
+                                                          - tf.square(H_mean)
                                                           - tf.exp(H_log_sigma_sq), 1))
             loss += kl_loss
-                                                     
+
             res['rec_sents_feed_y'] = rec_sent_1
             res['rec_sents'] = rec_sent_2
-            
-    
+
+
         else:
-    
+
             # deconv decoder
             H_dec2 = tf.expand_dims(tf.expand_dims(H_dec, 1),1)
             loss, res = deconv_decoder(H_dec2, x_org, W_norm, is_train, opt_t, res)
             res['rec_sents'] = res['rec_sents'][:,(opt.filter_shape - 1): (opt.filter_shape - 1 + opt.sentence)]
-            
-    
-    
+
+
+
     # *tf.cast(tf.not_equal(x_temp,0), tf.float32)
     tf.summary.scalar('loss', loss)
     tf.summary.scalar('kl_loss', kl_loss)
@@ -272,7 +266,8 @@ def run_model(opt, train, val, ixtoword):
     uidx = 0
     config = tf.ConfigProto(log_device_placement = False, allow_soft_placement=True, graph_options=tf.GraphOptions(build_cost_model=1))
     #config = tf.ConfigProto(device_count={'GPU':0})
-    config.gpu_options.per_process_gpu_memory_fraction = 0.8
+    # config.gpu_options.per_process_gpu_memory_fraction = 0.8
+    config.gpu_options.allow_growth = True
     np.set_printoptions(precision=3)
     np.set_printoptions(threshold=np.inf)
     saver = tf.train.Saver()
@@ -297,8 +292,8 @@ def run_model(opt, train, val, ixtoword):
                 print(e)
                 print("No saving session, using random initialization")
                 sess.run(tf.global_variables_initializer())
-	
-                
+
+
         for epoch in range(opt.max_epochs):
             print("Starting epoch %d" % epoch)
             # if epoch >= 10:
@@ -313,7 +308,7 @@ def run_model(opt, train, val, ixtoword):
                 sents_permutated = add_noise(sents, opt)
 
                 #sents[0] = np.random.permutation(sents[0])
-                
+
                 if opt.model != 'rnn_rnn' and opt.model != 'cnn_rnn':
                     x_batch_org = prepare_data_for_cnn(sents, opt) # Batch L
                 else:
@@ -323,14 +318,14 @@ def run_model(opt, train, val, ixtoword):
                     x_batch = prepare_data_for_cnn(sents_permutated, opt) # Batch L
                 else:
                     x_batch = prepare_data_for_rnn(sents_permutated, opt, is_add_GO = False) # Batch L
-                
-                
+
+
                 if profile:
                     _, loss = sess.run([train_op, loss_], feed_dict={x_: x_batch, x_org_: x_batch_org, is_train_:1},options=tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE),run_metadata=run_metadata)
                 else:
                     _, loss = sess.run([train_op, loss_], feed_dict={x_: x_batch, x_org_: x_batch_org, is_train_:1})
 
-                
+
 
                 if uidx % opt.valid_freq == 0:
                     is_train = None
@@ -354,23 +349,29 @@ def run_model(opt, train, val, ixtoword):
                     print("Validation loss %f " % (loss_val))
                     res = sess.run(res_, feed_dict={x_: x_val_batch, x_org_: x_val_batch_org, is_train_:is_train })
                     np.savetxt(opt.save_txt+'/rec_val_words.txt', res['rec_sents'], fmt='%i', delimiter=' ')
-                    print "Orig:" + u' '.join([ixtoword[x] for x in x_val_batch_org[0] if x != 0 and x != 1])#.encode('utf-8', 'ignore').strip()
-                    print "Sent:" + u' '.join([ixtoword[x] for x in res['rec_sents'][0] if x != 0])#.encode('utf-8', 'ignore').strip()
+                    try:
+                        print("Orig:" + u' '.join([ixtoword[x] for x in x_val_batch_org[0] if x != 0 and x != 1]))#.encode('utf-8', 'ignore').strip()
+                        print("Sent:" + u' '.join([ixtoword[x] for x in res['rec_sents'][0] if x != 0]))#.encode('utf-8', 'ignore').strip()
+                    except:
+                        pass
                     if opt.discrimination:
                         print ("Real Prob %f Fake Prob %f" % (res['prob_r'], res['prob_f']))
-                        
+
                     summary = sess.run(merged, feed_dict={x_: x_val_batch, x_org_: x_val_batch_org, is_train_:is_train })
                     test_writer.add_summary(summary, uidx)
                     is_train = True
-                    
-                
+
+
                 if uidx % opt.print_freq == 1:
                     #pdb.set_trace()
                     print("Iteration %d: loss %f " % (uidx, loss))
                     res = sess.run(res_, feed_dict={x_: x_batch, x_org_: x_batch_org, is_train_:1})
                     np.savetxt(opt.save_txt+'/rec_train_words.txt', res['rec_sents'], fmt='%i', delimiter=' ')
-                    print "Orig:" + u' '.join([ixtoword[x] for x in x_batch_org[0] if x != 0 and x != 1])#.encode('utf-8').strip()   
-                    print "Sent:" + u' '.join([ixtoword[x] for x in res['rec_sents'][0] if x != 0])#.encode('utf-8').strip()
+                    try:
+                        print("Orig:" + u' '.join([ixtoword[x] for x in x_batch_org[0] if x != 0 and x != 1]))#.encode('utf-8').strip()
+                        print("Sent:" + u' '.join([ixtoword[x] for x in res['rec_sents'][0] if x != 0]))#.encode('utf-8').strip()
+                    except:
+                        pass
                     summary = sess.run(merged, feed_dict={x_: x_batch, x_org_: x_batch_org, is_train_:1})
                     train_writer.add_summary(summary, uidx)
                     # print res['x_rec'][0][0]
@@ -396,15 +397,15 @@ def main():
         train, val = x[:100000], x[100000:]
         ixtoword, _ = cPickle.load(open('vocab_cotra.pkl','rb'))
         ixtoword = {i:x for i,x in enumerate(ixtoword)}
-        
-        
+
+
     elif choose_data == 'SNLI':
         trainpath = "./train_snli.txt"
         testpath = "./test_snli.txt"
         train, val =  np.loadtxt(trainpath), np.loadtxt(testpath)
         ixtoword, _ = cPickle.load(open('vocab_snli.pkl','rb'))
         ixtoword = {i:x for i,x in enumerate(ixtoword)}
-        
+
     elif choose_data == 'coco':
         trainpath = "./data/MS_COCO/14/train_coco_14.txt"
         testpath = "./data/MS_COCO/14/test_coco_14.txt"
@@ -418,7 +419,7 @@ def main():
         train, val =  np.loadtxt(trainpath), np.loadtxt(testpath)
         ixtoword, _ = cPickle.load(open('./data/vocab_news.pkl','rb'))
         ixtoword = {i:x for i,x in enumerate(ixtoword)}
-    
+
     opt = Options()
     print dict(opt)
     print('Total words: %d' % opt.n_words)

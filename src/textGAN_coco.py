@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
+"""
+Liqun Chen
+
+Text GAN with sinkhorn divergence/IPOT
+"""
+
 import os
-GPUID = 0
+GPUID = 1
 os.environ['CUDA_VISIBLE_DEVICES'] = str(GPUID)
 import sys
 # sys.path.append('/home/yl353/Peter/X2z2X')
-
-# reload(sys)
-# sys.setdefaultencoding('utf8')
 sys.path.append('/home/lqchen/work/textGAN/textGAN_public')
 
 import tensorflow as tf
@@ -25,7 +28,7 @@ import scipy.io as sio
 from math import floor
 import pdb
 
-from model2 import *
+from model import *
 from utils import prepare_data_for_cnn, prepare_data_for_rnn, get_minibatches_idx, normalizing, restore_from_save, \
     prepare_for_bleu, cal_BLEU, sent2idx, _clip_gradients_seperate_norm
 from denoise import *
@@ -44,8 +47,8 @@ FLAGS = flags.FLAGS
 
 class Options(object):
     def __init__(self):
-        self.dis_steps = 1
-        self.gen_steps = 5
+        self.dis_steps = 3
+        self.gen_steps = 1
         self.fix_emb = False
         self.reuse_w = False
         self.reuse_cnn = False
@@ -60,15 +63,15 @@ class Options(object):
         self.W_emb = None
         self.cnn_W = None
         self.cnn_b = None
-        self.maxlen = 51
-        self.n_words = 5728
+        self.maxlen = 41
+        self.n_words = 4391
         self.filter_shape = 5
         self.filter_size = 300
         self.multiplier = 2
         self.embed_size = 300
         self.latent_size = 128
         self.lr = 1e-5
-
+        
         self.rnn_share_emb = True
         self.additive_noise_lambda = 0.0
         self.bp_truncation = None
@@ -76,19 +79,19 @@ class Options(object):
 
         self.layer = 3
         self.stride = [2, 2, 2]   # for two layer cnn/deconv , use self.stride[0]
-        self.batch_size = 1000
+        self.batch_size = 64 * 16
         self.max_epochs = 60
         self.n_gan = 128  # self.filter_size * 3
         self.L = 100
 
         self.optimizer = 'Adam' #tf.train.AdamOptimizer(beta1=0.9) #'Adam' # 'Momentum' , 'RMSProp'
-        self.clip_grad = None #None  #100  #  20#
+        self.clip_grad = None  #100  #  20#
         self.attentive_emb = False
         self.decay_rate = 0.99
         self.relu_w = False
 
-        self.save_path = "./save_news/" + "news_" + str(self.n_gan) + "_dim_" + self.model + "_" + self.substitution + str(self.permutation)
-        self.log_path = "./log"
+        # self.save_path = "./save/" + "bird_" + str(self.n_gan) + "_dim_" + self.model + "_" + self.substitution + str(self.permutation)
+        # self.log_path = "./log"
         self.print_freq = 10
         self.valid_freq = 100
 
@@ -101,9 +104,45 @@ class Options(object):
         self.H_dis = 300
         self.ef_dim = 128
         self.sigma_range = [2]
+        
+        self.epsilon = 1 #0.01
+        self.niter = 40 #10
+        self.choose_data = 'coco'
+        # bird
+        if self.choose_data == 'cub':
+            self.maxlen = 41
+            self.n_words = 4391
+            self.save_path = "./save/" + "bird_" + \
+                str(self.n_gan) + "_dim_" + self.model + "_" + \
+                self.substitution + str(self.permutation)
+            self.log_path = "./log"
+            self.save_txt = './text'
+            self.batch_size = 64 * 16
+            self.train_size = 100000
 
-        self.epsilon = 100
-        self.niter = 20
+        # SNLI
+        elif self.choose_data == 'SNLI':
+            self.maxlen = 31
+            self.n_words = 33805
+            self.save_path = "./save_SNLI/" + "SNLI_" + \
+                str(self.n_gan) + "_dim_" + self.model + "_" + \
+                self.substitution + str(self.permutation)
+            self.log_path = "./log_SNLI"
+            self.save_txt = './text_SNLI'
+            self.batch_size = 64 * 4
+            self.train_size = 120000
+
+        # MS_COCO
+        elif self.choose_data == 'coco':
+            self.maxlen = 51
+            self.n_words = 27842
+            self.save_path = "./save_coco/" + "coco_" + \
+                str(self.n_gan) + "_dim_" + self.model + "_" + \
+                self.substitution + str(self.permutation)
+            self.save_txt = './text_coco'
+            self.log_path = "./log_coco"
+            self.batch_size = 320 #64 * 8
+            self.train_size = 120000
 
         self.sent_len = self.maxlen + 2*(self.filter_shape-1)
         self.sent_len2 = np.int32(floor((self.sent_len - self.filter_shape)/self.stride[0]) + 1)
@@ -147,14 +186,14 @@ def textGAN(x, x_org, opt):
     # print x.get_shape()  # batch L
     res_ = {}
 
-    with tf.variable_scope("pretrain"):
+    with tf.variable_scope("pretrain"):            
         z = tf.random_normal([opt.batch_size, opt.latent_size])
-        _, W_norm = embedding(x, opt, is_reuse = None)
+        _, W_norm = embedding(x, opt, is_reuse = None) 
         _, syn_sent, logits = lstm_decoder_embedding(z, x_org, W_norm, opt, feed_previous=True)
         prob = [tf.nn.softmax(l*opt.L) for l in logits]
         prob = tf.stack(prob,1)
-
-    with tf.variable_scope("d_net"):
+    
+    with tf.variable_scope("d_net"): 
         logits_real, H_real = discriminator(x, opt)
 
 
@@ -162,7 +201,7 @@ def textGAN(x, x_org, opt):
         # x_emb, W_norm = embedding(x, opt, is_reuse = None)  # batch L emb
         # x_emb = tf.expand_dims(x_emb, 3)  # batch L emb 1
         # H_enc, res = conv_encoder(x_emb, opt, res, is_reuse = None)
-
+        
     with tf.variable_scope("d_net"):
         logits_fake, H_fake = discriminator(prob, opt, is_prob = True, is_reuse = True)
 
@@ -170,14 +209,14 @@ def textGAN(x, x_org, opt):
         # H_enc_fake, res_ = conv_encoder(x_emb_fake, is_train, opt, res_, is_reuse=True)
         # logits_real = discriminator_2layer(H_enc, opt)
         # logits_syn = discriminator_2layer(H_enc_fake, opt, is_reuse=True)
-
+    
     res_['syn_sent'] = syn_sent
     res_['real_f'] = tf.squeeze(H_real)
     # Loss
-
+    
     D_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels = tf.ones_like(logits_real), logits = logits_real)) + \
-                 tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels = tf.zeros_like(logits_fake), logits = logits_fake))
-
+                tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels = tf.zeros_like(logits_fake), logits = logits_fake))
+  
     fake_mean = tf.reduce_mean(H_fake,axis=0)
     real_mean = tf.reduce_mean(H_real,axis=0)
     mean_dist = tf.sqrt(tf.reduce_mean((fake_mean - real_mean)**2))
@@ -185,24 +224,22 @@ def textGAN(x, x_org, opt):
 
     # cov_fake = acc_fake_xx - tensor.dot(acc_fake_mean.dimshuffle(0, 'x'), acc_fake_mean.dimshuffle(0, 'x').T)  +identity
     # cov_real = acc_real_xx - tensor.dot(acc_real_mean.dimshuffle(0, 'x'), acc_real_mean.dimshuffle(0, 'x').T)  +identity
-
+      
     # cov_fake_inv = tensor.nlinalg.matrix_inverse(cov_fake)
     # cov_real_inv = tensor.nlinalg.matrix_inverse(cov_real)
     #tensor.nlinalg.trace(tensor.dot(cov_fake_inv,cov_real) + tensor.dot(cov_real_inv,cov_fake))
-
+        
     GAN_loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=logits_fake, labels=tf.ones_like(logits_fake))
     MMD_loss = compute_MMD_loss(tf.squeeze(H_fake), tf.squeeze(H_real), opt)
-
-    # SINK_loss = sinkhorn_normalized(tf.squeeze(H_fake), tf.squeeze(H_real), opt)
-    SINK_loss = IPOT_distance(tf.squeeze(H_fake), tf.squeeze(H_real), opt)
-
-    # tf.reduce_mean(GAN_loss) #SINK_loss  # + tf.reduce_mean(GAN_loss)
-    # G_loss = MMD_loss #tf.reduce_mean(GAN_loss) 
-    G_loss = SINK_loss
-    D_loss =  SINK_loss * (-1)
+    # GAN_loss = 0
+    SINK_loss = sinkhorn_normalized(tf.squeeze(H_fake), tf.squeeze(H_real), opt)
+    
+    # G_loss = tf.reduce_mean(GAN_loss) # SINK_loss
+    G_loss = SINK_loss #+ tf.reduce_mean(GAN_loss)# MMD_loss * 0.1
+    D_loss = -SINK_loss #+ 0.5 * D_loss #+ MMD_loss  # -SINK_loss*0.01 +
     # mean_dist #MMD_loss # + tf.reduce_mean(GAN_loss) # mean_dist #
-
-    res_['mmd'] = MMD_loss
+    
+    res_['mmd'] = SINK_loss
     res_['sinkhorn'] = SINK_loss
     res_['gan'] = tf.reduce_mean(GAN_loss)
     # *tf.cast(tf.not_equal(x_temp,0), tf.float32)
@@ -216,9 +253,9 @@ def textGAN(x, x_org, opt):
                 # "gradient_norm",
                 ]
     global_step = tf.Variable(0, trainable=False)
-
+    
     all_vars = tf.trainable_variables()
-    g_vars = [var for var in all_vars if
+    g_vars = [var for var in all_vars if 
                   var.name.startswith('pretrain')]
     d_vars = [var for var in all_vars if
               var.name.startswith('d_')]
@@ -237,7 +274,7 @@ def textGAN(x, x_org, opt):
         variables = g_vars
         # summaries = summaries
         )
-
+    
     discriminator_op = layers.optimize_loss(
         D_loss,
         global_step = global_step,
@@ -290,7 +327,7 @@ def run_model(opt, train, val, ixtoword):
     uidx = 0
     config = tf.ConfigProto(log_device_placement = False, allow_soft_placement=True, graph_options=tf.GraphOptions(build_cost_model=1))
     #config = tf.ConfigProto(device_count={'GPU':0})
-    config.gpu_options.per_process_gpu_memory_fraction = 0.8
+    config.gpu_options.per_process_gpu_memory_fraction = 1.
     np.set_printoptions(precision=3)
     np.set_printoptions(threshold=np.inf)
     saver = tf.train.Saver()
@@ -308,31 +345,12 @@ def run_model(opt, train, val, ixtoword):
                 t_vars = tf.trainable_variables()
                 #print([var.name[:-2] for var in t_vars])
                 loader = restore_from_save(t_vars, sess, opt)
-                print('\nload successfully\n')
+                print('load successfully')
 
             except Exception as e:
                 print(e)
                 print("No saving session, using random initialization")
                 sess.run(tf.global_variables_initializer())
-
-        # for i in range(34):
-        #     valid_index = np.random.choice(
-        #         len(val), opt.batch_size)
-        #     val_sents = [val[t] for t in valid_index]
-        #     val_sents_permutated = add_noise(val_sents, opt)
-        #     x_val_batch = prepare_data_for_cnn(
-        #         val_sents_permutated, opt)
-        #     x_val_batch_org = prepare_data_for_rnn(val_sents, opt)
-        #     res = sess.run(res_, feed_dict={
-        #                     x_: x_val_batch, x_org_: x_val_batch_org})
-        #     if i == 0:
-        #         valid_text = res['syn_sent']
-        #     else:
-        #         valid_text = np.concatenate(
-        #             (valid_text, res['syn_sent']), 0)
-
-        # np.savetxt('./text_news/vae_words.txt', valid_text, fmt='%i', delimiter=' ')
-        # pdb.set_trace()
 
         for epoch in range(opt.max_epochs):
             print("Starting epoch %d" % epoch)
@@ -364,10 +382,10 @@ def run_model(opt, train, val, ixtoword):
                         _, d_loss = sess.run([dis_op, d_loss_], feed_dict={x_: x_batch, x_org_: x_batch_org})
                     if uidx % opt.gen_steps == 0:
                         _, g_loss = sess.run([gen_op, g_loss_], feed_dict={x_: x_batch, x_org_: x_batch_org})
-
+                
                 ''' validation '''
                 if uidx % opt.valid_freq == 0:
-
+                    
                     valid_index = np.random.choice(len(val), opt.batch_size)
                     val_sents = [val[t] for t in valid_index]
 
@@ -382,30 +400,27 @@ def run_model(opt, train, val, ixtoword):
 
                     res = sess.run(res_, feed_dict={x_: x_val_batch, x_org_: x_val_batch_org})
                     print("Validation d_loss %f, g_loss %f  mean_dist %f" % (d_loss_val, g_loss_val, res['mean_dist']))
-                    print("Sent:" + u' '.join([ixtoword[x] for x in res['syn_sent']
-                                               [0] if x != 0]))#.encode('utf-8', 'ignore').decode("utf8").strip())
+                    print("Sent:" + u' '.join([ixtoword[x] for x in res['syn_sent'][0] if x != 0]).encode('utf-8').strip())
                     print("MMD loss %f, GAN loss %f" % (res['mmd'], res['gan']))
-                    # np.savetxt('./text_arxiv/syn_val_words.txt', res['syn_sent'], fmt='%i', delimiter=' ')
+                    # np.savetxt('./text/syn_val_words.txt', res['syn_sent'], fmt='%i', delimiter=' ')
                     if opt.discrimination:
                         print ("Real Prob %f Fake Prob %f" % (res['prob_r'], res['prob_f']))
-
+                    
+                    
                     for i in range(4):
-                        valid_index = np.random.choice(
-                            len(val), opt.batch_size)
+                        valid_index = np.random.choice(len(val), opt.batch_size)
                         val_sents = [val[t] for t in valid_index]
                         val_sents_permutated = add_noise(val_sents, opt)
-                        x_val_batch = prepare_data_for_cnn(
-                            val_sents_permutated, opt)
+                        x_val_batch = prepare_data_for_cnn(val_sents_permutated, opt)
                         x_val_batch_org = prepare_data_for_rnn(val_sents, opt)
-                        res = sess.run(res_, feed_dict={
-                                       x_: x_val_batch, x_org_: x_val_batch_org})
+                        res = sess.run(res_, feed_dict={x_: x_val_batch, x_org_: x_val_batch_org})
                         if i == 0:
                             valid_text = res['syn_sent']
                         else:
-                            valid_text = np.concatenate(
-                                (valid_text, res['syn_sent']), 0)
+                            valid_text = np.concatenate((valid_text, res['syn_sent']), 0)
 
-                    np.savetxt('./text_news/syn_val_words.txt',valid_text, fmt='%i', delimiter=' ')
+                    # pdb.set_trace()
+                    np.savetxt('./text_coco/syn_val_words.txt', valid_text, fmt='%i', delimiter=' ')
 
                     val_set = [prepare_for_bleu(s) for s in val_sents]
                     [bleu2s, bleu3s, bleu4s] = cal_BLEU([prepare_for_bleu(s) for s in res['syn_sent']], {0: val_set})
@@ -413,16 +428,15 @@ def run_model(opt, train, val, ixtoword):
 
                     summary = sess.run(merged, feed_dict={x_: x_val_batch, x_org_: x_val_batch_org})
                     test_writer.add_summary(summary, uidx)
-
+                    
 
                 # if uidx % opt.print_freq == 0:
                 #     #pdb.set_trace()
                 #     res = sess.run(res_, feed_dict={x_: x_batch, x_org_: x_batch_org})
                 #     median_dis = np.sqrt(np.median([((x-y)**2).sum() for x in res['real_f'] for y in res['real_f']]))
-                #     print("Iteration %d: d_loss %f, g_loss %f, mean_dist %f, realdist median %f" % (uidx, d_loss, g_loss, res['mean_dist'], median_dis))
-                #     np.savetxt('./text_news/syn_train_words.txt', res['syn_sent'], fmt='%i', delimiter=' ')
-                #     print("Sent:" + u' '.join([ixtoword[x] for x in res['syn_sent']
-                #                                [0] if x != 0]).encode('utf-8', 'ignore').strip())
+                #     print("Iteration %d: d_loss %f, g_loss %f, mean_dist %f, realdist median %f" % (uidx, d_loss, g_loss, res['mean_dist'], median_dis))                    
+                #     np.savetxt('./text/syn_train_words.txt', res['syn_sent'], fmt='%i', delimiter=' ')
+                #     print("Sent:" + u' '.join([ixtoword[x] for x in res['syn_sent'][0] if x != 0]).encode('utf-8').strip())
 
                 #     summary = sess.run(merged, feed_dict={x_: x_batch, x_org_: x_batch_org})
                 #     train_writer.add_summary(summary, uidx)
@@ -434,7 +448,7 @@ def run_model(opt, train, val, ixtoword):
                 #         run_meta=run_metadata,
                 #         tfprof_options=tf.contrib.tfprof.model_analyzer.PRINT_ALL_TIMING_MEMORY)
 
-            # saver.save(sess, './save_news/news.ckpt')
+            saver.save(sess, './save/coco.ckpt')
 
 
 
@@ -442,24 +456,41 @@ def main():
     #global n_words
     # Prepare training and testing data
     #loadpath = "./data/three_corpus_small.p"
-    # loadpath = "./data/arxiv.p"
-    # x = cPickle.load(open(loadpath, 'rb'))
-    # train, val, test = x[0], x[1], x[2]
-    # train_text, val_text, test_text = x[3], x[4], x[5]
-    # train_lab, val_lab, test_lab = x[6], x[7], x[8]
-    # wordtoix, ixtoword = x[9], x[10]
-    trainpath = "./data/train_news.txt"
-    testpath = "./data/test_news.txt"
-    train, val =  np.loadtxt(trainpath), np.loadtxt(testpath)
-    ixtoword, _ = cPickle.load(open('./data/vocab_news.pkl','rb'))
-    ixtoword = {i:x for i,x in enumerate(ixtoword)}
+    # loadpath = "./real_cotra.txt"
+    # x = np.loadtxt(loadpath)
+    # train, val = x[:100000], x[100000:]
+    # ixtoword, _ = cPickle.load(open('vocab_cotra.pkl','rb'))
+    # ixtoword = {i:x for i,x in enumerate(ixtoword)}
     opt = Options()
 
-    print(dict(opt))
+    if opt.choose_data == 'cub':
+        loadpath = "./real_cotra.txt"
+        x = np.loadtxt(loadpath)
+        train, val = x[:100000], x[100000:]
+        ixtoword, _ = cPickle.load(open('vocab_cotra.pkl', 'rb'))
+        ixtoword = {i: x for i, x in enumerate(ixtoword)}
 
-    # opt.n_words = len(ixtoword) + 1
-    # ixtoword[opt.n_words - 1] = 'GO_'
+    elif opt.choose_data == 'SNLI':
+        trainpath = "./train_snli.txt"
+        testpath = "./test_snli.txt"
+        train, val = np.loadtxt(trainpath), np.loadtxt(testpath)
+        ixtoword, _ = cPickle.load(open('vocab_snli.pkl', 'rb'))
+        ixtoword = {i: x for i, x in enumerate(ixtoword)}
+
+    elif opt.choose_data == 'coco':
+        trainpath = "./data/MS_COCO/14/train_coco_14.txt"
+        testpath = "./data/MS_COCO/14/test_coco_14.txt"
+        train, val = np.loadtxt(trainpath), np.loadtxt(testpath)
+        ixtoword, _ = cPickle.load(
+            open('./data/MS_COCO/14/vocab_coco_14.pkl', 'rb'))
+        ixtoword = {i: x for i, x in enumerate(ixtoword)}
+
+    # train = train[:opt.train_size]
+    # val = val[random.sample(range(len(val)), 10000)]
+    train, val = train[:120000], val[:10000]
+    print(dict(opt))
     print('Total words: %d' % opt.n_words)
+    
     run_model(opt, train, val, ixtoword)
 
 
