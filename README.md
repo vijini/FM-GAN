@@ -18,7 +18,7 @@ Python 2.7, Tensorflow 1.8.0
 `model2.py`: IPOT edition
 
 ## Dataset:
-MSCOCO dataset and WMT news dataset can be downloaded from link below:
+MSCOCO dataset and WMT news dataset can be downloaded from link **HERE**:
 [Download link](https://www.dropbox.com/sh/ie48jptjxl3m4wk/AACMgLZZpACEMFynP55zA3Xla?dl=0)
 
 ## Evaluation:
