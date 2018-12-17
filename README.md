@@ -18,7 +18,20 @@ Python 2.7, Tensorflow 1.8.0
 `model2.py`: IPOT edition
 
 ## Dataset:
+MSCOCO dataset and WMT news dataset can be downloaded from link below:
 [Download link](https://www.dropbox.com/sh/ie48jptjxl3m4wk/AACMgLZZpACEMFynP55zA3Xla?dl=0)
+
+## Evaluation:
+Use `convert_new.py` to convert the indexed files to sentences.
+Then use `selfbleu.py` and `testbleu.py` to evaluate the results.
+
+Note that it is just a rough edition, you have to change the file names manually in the code, we will update this ASAP.
+
+## TODO:
+1. Clean the code, make it easy to understand.
+2. Don't need to manually change the file names in the code.
+3. etc.
+
 
 ## Citation 
 Please cite our paper if it helps with your research
