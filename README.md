@@ -18,7 +18,7 @@ Python 2.7, Tensorflow 1.8.0
 `model2.py`: IPOT edition
 
 ## Dataset:
-Uploading...
+[Download link](https://www.dropbox.com/sh/ie48jptjxl3m4wk/AACMgLZZpACEMFynP55zA3Xla?dl=0)
 
 ## Citation 
 Please cite our paper if it helps with your research
